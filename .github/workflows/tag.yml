@@ -114,6 +114,16 @@ jobs:
         with:
           path: artifacts
 
+      - name: Prepare Release Assets
+        id: prepare_assets
+        run: |
+          # Package the Windows build into a versioned zip file
+          WINDOWS_ZIP="sonolus-injector-${{ github.ref_name }}-windows.zip"
+          cd artifacts/windows-build
+          zip -r "../../${WINDOWS_ZIP}" .
+          cd ../..
+          echo "windows_zip_name=${WINDOWS_ZIP}" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -122,6 +132,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/windows-build/*
-            artifacts/apk-build/*
+            ${{ steps.prepare_assets.outputs.windows_zip_name }}
+            artifacts/apk-build/*.apk
             
