@@ -1,0 +1,127 @@
+name: Create Release
+
+on:
+  push:
+    # 仅在推送 v*.*.* 格式的标签时运行 (例如 v1.2.3 或 v1.2.3+4)
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  # 授予创建 Release 和上传附件的权限
+  contents: write
+
+env:
+  # Python version to use
+  PYTHON_VERSION: 3.13.5
+
+  # flet-cli version to install for `flet build`
+  FLET_CLI_VERSION: 0.28.3
+
+  # Ensures Python uses UTF-8 encoding by default
+  PYTHONUTF8: 1
+
+  # Disables rich text formatting in Flet CLI output
+  FLET_CLI_NO_RICH_OUTPUT: 1
+
+  # Disables progress bars when using UV
+  UV_NO_PROGRESS: 1
+
+jobs:
+  parse-version:
+    runs-on: ubuntu-latest
+    outputs:
+      build_version: ${{ steps.parse_version.outputs.BUILD_VERSION }}
+      build_number: ${{ steps.parse_version.outputs.BUILD_NUMBER }}
+    steps:
+      - name: Parse Version from Tag
+        id: parse_version
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          VERSION_STRING="${TAG_NAME#v}"
+          if [[ "$VERSION_STRING" == *"+"* ]]; then
+            BUILD_VERSION="${VERSION_STRING%+*}"
+            BUILD_NUMBER="${VERSION_STRING#*+}"
+          else
+            BUILD_VERSION="$VERSION_STRING"
+            BUILD_NUMBER="1"
+          fi
+          echo "BUILD_VERSION=$BUILD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Parsed Version: $BUILD_VERSION, Build Number: $BUILD_NUMBER"
+
+  build-windows:
+    needs: parse-version
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install flet-cli ${{ env.FLET_CLI_VERSION }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install flet-cli==$env:FLET_CLI_VERSION
+
+      - name: Flet Build Windows
+        run: |
+          flet build windows --verbose --no-rich-output --build-number=${{ needs.parse-version.outputs.build_number }} --build-version=${{ needs.parse-version.outputs.build_version }}
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: build/windows/
+          if-no-files-found: error
+
+  build-apk:
+    needs: parse-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install flet-cli ${{ env.FLET_CLI_VERSION }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install flet-cli==$FLET_CLI_VERSION
+
+      - name: Flet Build APK
+        run: |
+          flet build apk --verbose --no-rich-output --build-number=${{ needs.parse-version.outputs.build_number }} --build-version=${{ needs.parse-version.outputs.build_version }}
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-build
+          path: build/apk/
+          if-no-files-found: error
+
+  release:
+    needs: [build-windows, build-apk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/windows-build/*
+            artifacts/apk-build/*
+            
